@@ -1,8 +1,17 @@
 ;;; package --- Utility functions for calling SL -*- lexical-binding: t -*-
 ;;; Commentary:
 ;;; This is just something for fun so that I can call my own Emacs functions
-;;; Author: Daniel Figueroa (entilldaniel)
+;;; Author: Daniel Figueroa
+;;; Maintainer: Daniel Figueroa <daniel@figueroa.se>
+;;; URL: http://github.com/entilldaniel/slel.git
+
+
 ;;; Code:
+
+(require 'dash)
+
+
+(setq sl/my-stations '(("Skanstull" . 9190) ("Björkhagen" . 9143) ("Gullmarsplan" . 9189) ("Slussen" . 9192)))
 
 (defun sl/locations ()
   "Retrieve the id of a station."
@@ -21,16 +30,6 @@
 			 (key (completing-read "Pick a destination: " (mapcar #'car choices)  nil t)))
 		(alist-get key choices nil nil 'string=)))))
 
-(defun sl/present (obj)
-  "Convert a departure OBJ to something readable."
-  (let ((destination (alist-get 'destination obj))
-		(state (alist-get 'state obj))
-		(display (alist-get 'display obj))
-		(designation (alist-get 'designation (alist-get 'line obj))))
-	(if (not (string= "CANCELLED" state))
-		(concat "linje " designation " " destination "\n" display "\n")
-	  "")))
-
 (defun sl/show-departures (site-id)
   "Show departures from selected SITE-ID."
   (let ((buffer (url-retrieve-synchronously (format "https://transport.integration.sl.se/v1/sites/%s/departures?transport=METRO" site-id))))
@@ -41,21 +40,58 @@
 	  (search-forward "\n\n")
 	  (let* ((json-object-type 'alist)
 			 (data (json-read))
-			 (departures (alist-get 'departures data))
-			 (strings (mapcar 'sl/present  departures)))
+			 (departures (alist-get 'departures data)))
 		(erase-buffer)
-		(-each strings (lambda (str) (insert str "\n")))
+		(print-results departures)
 		(goto-char (point-min))
 		(local-set-key (kbd "q") #'quit-window)
 		(switch-to-buffer buffer)))))
+
+
+(defun print-results (departures)
+  "Iterate over DEPARTURES and print them nicely."
+  (let ((result '()))
+	(-each departures (lambda (departure)
+						(let* ((line-id (alist-get 'id (alist-get 'line departure)))
+							   (direction (alist-get 'direction_code departure))
+							   (state (alist-get 'state departure))
+							   (destination (alist-get 'destination departure))
+							   (display (alist-get 'display departure))
+							   (object `((state . ,state)
+										 (destination . ,destination)
+										 (display . ,display)
+										 (line . ,line-id))))
+						  (unless (assoc line-id result)
+							(push `(,line-id . ((1 . ()) (2 . ()))) result))
+						  
+						  (push object
+								(alist-get direction (alist-get line-id result))))))
+	;; Print the data nicely
+	(dolist (line (sort result))
+	  (let ((key (car line))
+			(value (cdr line)))
+		(insert (format "\nLinje: %s" key))
+
+		(dolist (printable (-zip-fill '((destination . "") (display . ""))
+									  (reverse (cl-remove-if-not (lambda (x) (eq key (alist-get 'line x))) (alist-get 1 value)))
+									  (reverse (cl-remove-if-not (lambda (x) (eq key (alist-get 'line x))) (alist-get 2 value)))
+									  ))
+		  (let ((left (car printable))
+				(right (cdr printable)))
+			(insert (format "\n%-6s - %s %-25s %-6s - %s %s"
+							(alist-get 'display left) (alist-get 'state left) (alist-get 'destination left)
+							(alist-get 'display right) (alist-get 'state right) (alist-get 'destination right)))
+			)
+		  )
+		)
+	  (insert "\n"))
+	))
 
 (defun sl/select-and-show ()
   "Select a site and show departures."
   (interactive)
   (let ((site-id (sl/locations)))
 	(sl/show-departures site-id)))
-
-(setq sl/my-stations '(("Skanstull" . 9190) ("Björkhagen" . 9143) ("Gullmarsplan" . 9189) ("Slussen" . 9192)))
 
 (defun sl/show-selected ()
   "Show departures from a preconfigured list of stations."
@@ -65,4 +101,6 @@
 
 (provide 'sl)
 ;;; sl.el ends here.
+
+
 
