@@ -1,9 +1,8 @@
 ;;; package --- Utility functions for calling SL -*- lexical-binding: t -*-
 ;;; Commentary:
 ;;; This is just something for fun so that I can call my own Emacs functions
-
+;;; Author: Daniel Figueroa (entilldaniel)
 ;;; Code:
-
 
 (defun sl/locations ()
   "Retrieve the id of a station."
@@ -30,8 +29,7 @@
 		(designation (alist-get 'designation (alist-get 'line obj))))
 	(if (not (string= "CANCELLED" state))
 		(concat "linje " designation " " destination "\n" display "\n")
-	  "---- cancelled ---\n")))
-
+	  "")))
 
 (defun sl/show-departures (site-id)
   "Show departures from selected SITE-ID."
@@ -50,7 +48,6 @@
 		(goto-char (point-min))
 		(local-set-key (kbd "q") #'quit-window)
 		(switch-to-buffer buffer)))))
-
 
 (defun sl/select-and-show ()
   "Select a site and show departures."
