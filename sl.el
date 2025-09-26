@@ -30,77 +30,102 @@
 			 (key (completing-read "Pick a destination: " (mapcar #'car choices)  nil t)))
 		(alist-get key choices nil nil 'string=)))))
 
-(defun sl/show-departures (site-id)
+(defun sl/get-departures (site-id)
   "Show departures from selected SITE-ID."
-  (let ((buffer (url-retrieve-synchronously (format "https://transport.integration.sl.se/v1/sites/%s/departures?transport=METRO" site-id))))
-	(with-current-buffer buffer
-	  (set-buffer-multibyte t)
-	  (prefer-coding-system 'utf-8)
-	  (goto-char (point-min))
-	  (search-forward "\n\n")
-	  (let* ((json-object-type 'alist)
-			 (data (json-read))
-			 (departures (alist-get 'departures data)))
-		(erase-buffer)
-		(print-results departures)
-		(goto-char (point-min))
-		(local-set-key (kbd "q") #'quit-window)
-		(switch-to-buffer buffer)))))
+  (let ((result-buffer (url-retrieve-synchronously  (format "https://transport.integration.sl.se/v1/sites/%s/departures?transport=METRO" site-id))))
+	(unwind-protect
+		(with-current-buffer result-buffer
+		  (set-buffer-multibyte t)
+		  (prefer-coding-system 'utf-8)
+		  (goto-char (point-min))
+		  (search-forward "\n\n")
+		  (let* ((json-object-type 'alist)
+				 (data (json-read)))
+			(alist-get 'departures data)))
+	  (kill-buffer result-buffer))))
 
+(defun sl/format-departures (raw-departures)
+  "Filter and format RAW-DEPARTURES and return a nicely formatted string."
+  (with-temp-buffer
+	(let ((lines '())
+		  (departures '()))
+	  (-each raw-departures (lambda (departure)
+							  (let* ((line-id (alist-get 'id (alist-get 'line departure)))
+									 (direction (alist-get 'direction_code departure))
+									 (state (alist-get 'state departure))
+									 (destination (alist-get 'destination departure))
+									 (display (alist-get 'display departure))
+									 (object `((direction . ,direction)
+											   (state . ,state)
+											   (destination . ,destination)
+											   (display . ,display)
+											   (line . ,line-id))))
+								(setf lines (push line-id lines))
+								(setf departures (push object departures)))))
+	  ;; First split the list into directions
+	  (let ((dir1 (seq-filter (lambda (x) (eq 1 (alist-get 'direction x))) departures))
+			(dir2 (seq-filter (lambda (x) (eq 2 (alist-get 'direction x))) departures)))
+		(dolist (line (sort (seq-uniq lines)))
+		  (insert (propertize (format "\nLinje: %s" line) 'face 'bold))
+		  ;; Get only the ones we're after
+		  (let ((lefties (filter-side line dir1))
+				(righties (filter-side line dir2)))
+			(dolist (departure (-zip-fill '((destination . "") (display . "")) lefties righties))
+			  (let ((left (cdr departure))
+					(right (car departure)))
+				(insert (departure-line left right)))))
+		  (insert "\n\n")))
+	  (buffer-string))))
 
-(defun print-results (departures)
-  "Iterate over DEPARTURES and print them nicely."
-  (let ((result '()))
-	(-each departures (lambda (departure)
-						(let* ((line-id (alist-get 'id (alist-get 'line departure)))
-							   (direction (alist-get 'direction_code departure))
-							   (state (alist-get 'state departure))
-							   (destination (alist-get 'destination departure))
-							   (display (alist-get 'display departure))
-							   (object `((state . ,state)
-										 (destination . ,destination)
-										 (display . ,display)
-										 (line . ,line-id))))
-						  (unless (assoc line-id result)
-							(push `(,line-id . ((1 . ()) (2 . ()))) result))
-						  
-						  (push object
-								(alist-get direction (alist-get line-id result))))))
-	;; Print the data nicely
-	(dolist (line (sort result))
-	  (let ((key (car line))
-			(value (cdr line)))
-		(insert (format "\nLinje: %s" key))
+(defun filter-side (line direction)
+  "Filter out which side for printing we want from LINE and DIRECTION."
+  (reverse (seq-filter (lambda (x) (eq line (alist-get 'line x))) direction)))
 
-		(dolist (printable (-zip-fill '((destination . "") (display . ""))
-									  (reverse (cl-remove-if-not (lambda (x) (eq key (alist-get 'line x))) (alist-get 1 value)))
-									  (reverse (cl-remove-if-not (lambda (x) (eq key (alist-get 'line x))) (alist-get 2 value)))
-									  ))
-		  (let ((left (car printable))
-				(right (cdr printable)))
-			(insert (format "\n%-6s - %s %-25s %-6s - %s %s"
-							(alist-get 'display left) (alist-get 'state left) (alist-get 'destination left)
-							(alist-get 'display right) (alist-get 'state right) (alist-get 'destination right)))
-			)
-		  )
-		)
-	  (insert "\n"))
-	))
+(defun departure-line (left right)
+  "Return a formatted string with LEFT and RIGHT data."
+  (let ((left-format (format "\n%-6s %-18s" (alist-get 'display left) (alist-get 'destination left)))
+		(right-format (format " %-6s %s" (alist-get 'display right) (alist-get 'destination right))))
+	(concat
+	 (if (string= "CANCELLED" (alist-get 'state left))
+		 (propertize left-format 'face '(:foreground "red"))
+	   left-format)
+	 (if (string= "CANCELLED" (alist-get 'state right))
+		 (propertize right-format 'face '(:foreground "red"))
+	   right-format))))
+
+(defun sl/show-departures (data)
+  "Print DATA into a buffer and show it."
+  (with-current-buffer (get-buffer-create "*SL Departures*")
+	(erase-buffer)
+	(enriched-mode)
+	(insert data)
+	(goto-char (point-min))
+	(switch-to-buffer "*SL Departures*")))
 
 (defun sl/select-and-show ()
   "Select a site and show departures."
   (interactive)
   (let ((site-id (sl/locations)))
-	(sl/show-departures site-id)))
+	(sl/show-departures
+	 (sl/format-departures
+	  (sl/get-departures site-id)))))
 
 (defun sl/show-selected ()
   "Show departures from a preconfigured list of stations."
   (interactive)
   (let ((station (completing-read "Pick a station: " (mapcar #'car sl/my-stations))))
-	(sl/show-departures (alist-get station sl/my-stations nil nil 'string=))))
+	(sl/show-departures
+	 (sl/format-departures
+	  (sl/get-departures (alist-get station sl/my-stations nil nil 'string=))))))
 
 (provide 'sl)
 ;;; sl.el ends here.
+
+
+
+
+
+
 
 
 
