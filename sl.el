@@ -19,12 +19,29 @@
 			(define-key map (kbd "q") 'quit-window)
 			map))
 
+(defgroup sl nil "SL departures customization group.")
 
-(setq sl/my-stations '(("Skanstull" . 9190) ("Björkhagen" . 9143) ("Gullmarsplan" . 9189) ("Slussen" . 9192)))
+(defcustom sl/my-stations
+  '(("Skanstull" . 9190) ("Björkhagen" . 9143) ("Gullmarsplan" . 9189) ("Slussen" . 9192))
+  "A predefined list with SL stations and their codes."
+  :type '(alist :key-type string :value-type integer)
+  :group 'sl)
+
+(defvar sl/locations-cache nil "Caches the stations and their ID's.")
+
+(defun marginalia-sl/location-annotation (cand)
+  "Show site-id for SL location candidate CAND."
+  (propertize
+   (format " [%s]" (cdr (assoc cand sl/locations-cache)))
+   'face '(:foreground "dim gray")))
+
+(with-eval-after-load 'marginalia
+  (add-to-list 'marginalia-annotators
+			   '(sl/location . (marginalia-sl/location-annotation))))
 
 (defun sl/locations ()
   "Retrieve the id of a station."
-  (let ((buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites?expand=true&transportation=METRO")))
+  (let ((buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites")))
 	(with-current-buffer buffer
 	  (set-buffer-multibyte t)
 	  (prefer-coding-system 'utf-8)
@@ -35,9 +52,14 @@
 			 (items (json-read))
 			 (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
 			 (choices (mapcar (lambda (obj)
-  								`(,(alist-get 'name obj) . ,(alist-get 'id obj))) filtered))
-			 (key (completing-read "Pick a destination: " (mapcar #'car choices)  nil t)))
-		(alist-get key choices nil nil 'string=)))))
+								(cons (alist-get 'name obj)
+									  (alist-get 'id obj)))
+							  filtered))
+			 (choice-names (mapcar 'car choices)))
+		(setq sl/locations-cache choices)
+		(let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
+			  (completion-extra-properties '(:category sl/location)))
+		  (cdr (assoc (completing-read "Pick a destination: " choice-names nil t) choices)))))))
 
 (defun sl/get-departures (site-id)
   "Show departures from selected SITE-ID."
