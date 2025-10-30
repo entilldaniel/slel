@@ -1,0 +1,13 @@
+# -*- restclient -*-
+#
+# Get a list of stations
+#
+#
+
+GET https://transport.integration.sl.se/v1/sites?expand=true
+
+#
+# Retrieve the list of departures
+#
+
+GET https://transport.integration.sl.se/v1/sites/9143/departures?transport=METRO
