@@ -10,7 +10,6 @@
 
 (require 'dash)
 
-
 (define-minor-mode sl-departures-mode
   "Minor mode for displaying departures from a selected station using the SL API."
   :lighter " Departures"
@@ -39,27 +38,34 @@
   (add-to-list 'marginalia-annotators
 			   '(sl/location . (marginalia-sl/location-annotation))))
 
+
+;; TODO: This method uses a synchronous cal and blocks the UI.
+;; The code is duplicated in the two paths.
 (defun sl/locations ()
   "Retrieve the id of a station."
-  (let ((buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites")))
-	(with-current-buffer buffer
-	  (set-buffer-multibyte t)
-	  (prefer-coding-system 'utf-8)
-	  (goto-char (point-min))
-	  (search-forward "\n\n")
-	  (let* ((json-array-type 'list)
-			 (json-object-type 'alist)
-			 (items (json-read))
-			 (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
-			 (choices (mapcar (lambda (obj)
-								(cons (alist-get 'name obj)
-									  (alist-get 'id obj)))
-							  filtered))
-			 (choice-names (mapcar 'car choices)))
-		(setq sl/locations-cache choices)
-		(let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
-			  (completion-extra-properties '(:category sl/location)))
-		  (cdr (assoc (completing-read "Pick a destination: " choice-names nil t) choices)))))))
+  (if sl/locations-cache
+	  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
+			(completion-extra-properties '(:category sl/location)))
+		(cdr (assoc (completing-read "Pick a destination: " (mapcar 'car sl/locations-cache) nil t) sl/locations-cache)))
+	(let ((buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites")))
+	  (with-current-buffer buffer
+		(set-buffer-multibyte t)
+		(prefer-coding-system 'utf-8)
+		(goto-char (point-min))
+		(search-forward "\n\n")
+		(let* ((json-array-type 'list)
+			   (json-object-type 'alist)
+			   (items (json-read))
+			   (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
+			   (choices (mapcar (lambda (obj)
+								  (cons (alist-get 'name obj)
+										(alist-get 'id obj)))
+								filtered))
+			   (choice-names (mapcar 'car choices)))
+		  (setq sl/locations-cache choices)
+		  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
+				(completion-extra-properties '(:category sl/location)))
+			(cdr (assoc (completing-read "Pick a destination: " choice-names nil t) choices))))))))
 
 (defun sl/get-departures (site-id)
   "Show departures from selected SITE-ID."
