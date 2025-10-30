@@ -11,6 +11,15 @@
 (require 'dash)
 
 
+(define-minor-mode sl-departures-mode
+  "Minor mode for displaying departures from a selected station using the SL API."
+  :lighter " Departures"
+  :keymap (let ((map (make-sparse-keymap)))
+			(define-key map (kbd "g") #'sl/refresh-selected)
+			(define-key map (kbd "q") 'quit-window)
+			map))
+
+
 (setq sl/my-stations '(("Skanstull" . 9190) ("Björkhagen" . 9143) ("Gullmarsplan" . 9189) ("Slussen" . 9192)))
 
 (defun sl/locations ()
@@ -66,22 +75,23 @@
 	  (let ((dir1 (seq-filter (lambda (x) (eq 1 (alist-get 'direction x))) departures))
 			(dir2 (seq-filter (lambda (x) (eq 2 (alist-get 'direction x))) departures)))
 		(dolist (line (sort (seq-uniq lines)))
+		  (insert (format "Called at: %s\n" (propertize (format-time-string "%H:%M") 'face 'bold)))
 		  (insert (propertize (format "\nLinje: %s" line) 'face 'bold))
 		  ;; Get only the ones we're after
-		  (let ((lefties (filter-side line dir1))
-				(righties (filter-side line dir2)))
+		  (let ((lefties (sl/filter-side line dir1))
+				(righties (sl/filter-side line dir2)))
 			(dolist (departure (-zip-fill '((destination . "") (display . "")) lefties righties))
 			  (let ((left (cdr departure))
 					(right (car departure)))
-				(insert (departure-line left right)))))
+				(insert (sl/departure-line left right)))))
 		  (insert "\n\n")))
 	  (buffer-string))))
 
-(defun filter-side (line direction)
+(defun sl/filter-side (line direction)
   "Filter out which side for printing we want from LINE and DIRECTION."
   (reverse (seq-filter (lambda (x) (eq line (alist-get 'line x))) direction)))
 
-(defun departure-line (left right)
+(defun sl/departure-line (left right)
   "Return a formatted string with LEFT and RIGHT data."
   (let ((left-format (format "\n%-6s %-18s" (alist-get 'display left) (alist-get 'destination left)))
 		(right-format (format " %-6s %s" (alist-get 'display right) (alist-get 'destination right))))
@@ -93,12 +103,16 @@
 		 (propertize right-format 'face '(:foreground "red"))
 	   right-format))))
 
-(defun sl/show-departures (data)
-  "Print DATA into a buffer and show it."
+(defun sl/show-departures (site-id data)
+  "Store SITE-ID for extra functionality.  Print DATA into a buffer and show it."
   (with-current-buffer (get-buffer-create "*SL Departures*")
+	(read-only-mode -1)
+	(sl-departures-mode 1)
+	(setq-local local-site-id site-id)
 	(erase-buffer)
-	(enriched-mode)
+	(enriched-mode 1)
 	(insert data)
+	(read-only-mode)
 	(goto-char (point-min))
 	(switch-to-buffer "*SL Departures*")))
 
@@ -107,6 +121,7 @@
   (interactive)
   (let ((site-id (sl/locations)))
 	(sl/show-departures
+	 site-id
 	 (sl/format-departures
 	  (sl/get-departures site-id)))))
 
@@ -114,18 +129,21 @@
   "Show departures from a preconfigured list of stations."
   (interactive)
   (let ((station (completing-read "Pick a station: " (mapcar #'car sl/my-stations))))
-	(sl/show-departures
-	 (sl/format-departures
-	  (sl/get-departures (alist-get station sl/my-stations nil nil 'string=))))))
+	(let ((site-id (alist-get station sl/my-stations nil nil 'string=)))
+	  (sl/show-departures
+	   site-id
+	   (sl/format-departures
+		(sl/get-departures site-id))))))
+
+(defun sl/refresh-selected ()
+  "Refresh from SITE-ID and show new departures."
+  (interactive)
+  (sl/show-departures
+   local-site-id
+   (sl/format-departures
+	(sl/get-departures local-site-id))))
+
 
 (provide 'sl)
 ;;; sl.el ends here.
-
-
-
-
-
-
-
-
 
