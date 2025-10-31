@@ -47,25 +47,27 @@
 	  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
 			(completion-extra-properties '(:category sl/location)))
 		(cdr (assoc (completing-read "Pick a destination: " (mapcar 'car sl/locations-cache) nil t) sl/locations-cache)))
-	(let ((buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites")))
-	  (with-current-buffer buffer
-		(set-buffer-multibyte t)
-		(prefer-coding-system 'utf-8)
-		(goto-char (point-min))
-		(search-forward "\n\n")
-		(let* ((json-array-type 'list)
-			   (json-object-type 'alist)
-			   (items (json-read))
-			   (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
-			   (choices (mapcar (lambda (obj)
-								  (cons (alist-get 'name obj)
-										(alist-get 'id obj)))
-								filtered))
-			   (choice-names (mapcar 'car choices)))
-		  (setq sl/locations-cache choices)
-		  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
-				(completion-extra-properties '(:category sl/location)))
-			(cdr (assoc (completing-read "Pick a destination: " choice-names nil t) choices))))))))
+	(let ((sites-buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites")))
+	  (unwind-protect
+		  (with-current-buffer sites-buffer
+			(set-buffer-multibyte t)
+			(prefer-coding-system 'utf-8)
+			(goto-char (point-min))
+			(search-forward "\n\n")
+			(let* ((json-array-type 'list)
+				   (json-object-type 'alist)
+				   (items (json-read))
+				   (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
+				   (choices (mapcar (lambda (obj)
+									  (cons (alist-get 'name obj)
+											(alist-get 'id obj)))
+									filtered))
+				   (choice-names (mapcar 'car choices)))
+			  (setq sl/locations-cache choices)
+			  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
+					(completion-extra-properties '(:category sl/location)))
+				(cdr (assoc (completing-read "Pick a destination: " choice-names nil t) choices)))))
+		(kill-buffer sites-buffer)))))
 
 (defun sl/get-departures (site-id)
   "Show departures from selected SITE-ID."
@@ -84,6 +86,7 @@
 (defun sl/format-departures (raw-departures)
   "Filter and format RAW-DEPARTURES and return a nicely formatted string."
   (with-temp-buffer
+	(insert (format "Called at: %s\n" (propertize (format-time-string "%H:%M") 'face 'bold)))
 	(let ((lines '())
 		  (departures '()))
 	  (-each raw-departures (lambda (departure)
@@ -103,7 +106,6 @@
 	  (let ((dir1 (seq-filter (lambda (x) (eq 1 (alist-get 'direction x))) departures))
 			(dir2 (seq-filter (lambda (x) (eq 2 (alist-get 'direction x))) departures)))
 		(dolist (line (sort (seq-uniq lines)))
-		  (insert (format "Called at: %s\n" (propertize (format-time-string "%H:%M") 'face 'bold)))
 		  (insert (propertize (format "\nLinje: %s" line) 'face 'bold))
 		  ;; Get only the ones we're after
 		  (let ((lefties (sl/filter-side line dir1))
@@ -116,7 +118,8 @@
 	  (buffer-string))))
 
 (defun sl/filter-side (line direction)
-  "Filter out which side for printing we want from LINE and DIRECTION."
+  "Filter out which side for printing we want from LINE and DIRECTION.
+Reverse the list so that we see the earliest departures first."
   (reverse (seq-filter (lambda (x) (eq line (alist-get 'line x))) direction)))
 
 (defun sl/departure-line (left right)
@@ -136,7 +139,7 @@
   (with-current-buffer (get-buffer-create "*SL Departures*")
 	(read-only-mode -1)
 	(sl-departures-mode 1)
-	(setq-local local-site-id site-id)
+	(setq-local sl/local-site-id site-id)
 	(erase-buffer)
 	(enriched-mode 1)
 	(insert data)
@@ -167,11 +170,27 @@
   "Refresh from SITE-ID and show new departures."
   (interactive)
   (sl/show-departures
-   local-site-id
+   sl/local-site-id
    (sl/format-departures
-	(sl/get-departures local-site-id))))
+	(sl/get-departures sl/local-site-id))))
 
+
+(defun sl/clear-cache ()
+  "Clears the cache, used for development mainly."
+  (interactive)
+  (setq sl/locations-cache nil))
+
+(defun sl/show-local-site-id ()
+  "Show the local site id."
+  (interactive)
+  (message (format "Site ID: %s" sl/local-site-id)))
 
 (provide 'sl)
 ;;; sl.el ends here.
+
+
+
+
+
+
 
