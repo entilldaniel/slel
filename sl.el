@@ -38,50 +38,54 @@
   (add-to-list 'marginalia-annotators
 			   '(sl/location . (marginalia-sl/location-annotation))))
 
+(defun sl/show-completions-menu (choices)
+  "Show the menu based on entries in CHOICES."
+  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
+		(completion-extra-properties '(:category sl/location)))
+	(cdr (assoc (completing-read "Pick a destination: " (mapcar 'car choices) nil t) choices))))
 
-;; TODO: This method uses a synchronous cal and blocks the UI.
-;; The code is duplicated in the two paths.
-(defun sl/locations ()
-  "Retrieve the id of a station."
+(defun sl/get-locations (continue)
+  "Get locations to select and pass CONTINUE to callback."
   (if sl/locations-cache
-	  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
-			(completion-extra-properties '(:category sl/location)))
-		(cdr (assoc (completing-read "Pick a destination: " (mapcar 'car sl/locations-cache) nil t) sl/locations-cache)))
-	(let ((sites-buffer (url-retrieve-synchronously "https://transport.integration.sl.se/v1/sites")))
-	  (unwind-protect
-		  (with-current-buffer sites-buffer
-			(set-buffer-multibyte t)
-			(prefer-coding-system 'utf-8)
-			(goto-char (point-min))
-			(search-forward "\n\n")
-			(let* ((json-array-type 'list)
-				   (json-object-type 'alist)
-				   (items (json-read))
-				   (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
-				   (choices (mapcar (lambda (obj)
-									  (cons (alist-get 'name obj)
-											(alist-get 'id obj)))
-									filtered))
-				   (choice-names (mapcar 'car choices)))
-			  (setq sl/locations-cache choices)
-			  (let ((completion-category-defaults '((sl/location (annotation-function . marginalia-sl/location-annotation))))
-					(completion-extra-properties '(:category sl/location)))
-				(cdr (assoc (completing-read "Pick a destination: " choice-names nil t) choices)))))
-		(kill-buffer sites-buffer)))))
+	  (funcall continue)
+	(url-retrieve "https://transport.integration.sl.se/v1/sites" #'get-locations-callback `(,continue))))
 
-(defun sl/get-departures (site-id)
-  "Show departures from selected SITE-ID."
-  (let ((result-buffer (url-retrieve-synchronously  (format "https://transport.integration.sl.se/v1/sites/%s/departures?transport=METRO" site-id))))
-	(unwind-protect
-		(with-current-buffer result-buffer
-		  (set-buffer-multibyte t)
-		  (prefer-coding-system 'utf-8)
-		  (goto-char (point-min))
-		  (search-forward "\n\n")
-		  (let* ((json-object-type 'alist)
-				 (data (json-read)))
-			(alist-get 'departures data)))
-	  (kill-buffer result-buffer))))
+(defun sl/get-locations-callback (status continue)
+  "Callback for get-locations-new that handles STATUS and will call CONTINUE."
+  (unwind-protect
+	  (progn
+		(set-buffer-multibyte t)
+		(prefer-coding-system 'utf-8)
+		(goto-char url-http-end-of-headers)
+		(let* ((json-array-type 'list)
+			   (json-object-type 'alist)
+			   (items (json-read))
+			   (filtered (-filter (lambda (x) (alist-get 'abbreviation x)) items))
+			   (choices (mapcar (lambda (obj)
+								  (cons (alist-get 'name obj)
+										(alist-get 'id obj)))
+								filtered)))
+		  (setq sl/locations-cache choices))
+		(kill-buffer (current-buffer))))
+  (funcall continue))
+
+(defun sl/get-departures (site-id continue)
+  "Get departures from SITE-ID and pass CONTINUE through to callback."
+  (url-retrieve (format "https://transport.integration.sl.se/v1/sites/%s/departures?transport=METRO" site-id)
+				#'departures-callback `(,site-id ,continue)))
+
+(defun sl/departures-callback (status site-id continue)
+  "Callback that handles STATUS, SITE-ID and CONTINUE."
+  (unwind-protect
+	  (progn
+		(set-buffer-multibyte t)
+		(prefer-coding-system 'utf-8)
+		(goto-char (point-min))
+		(search-forward "\n\n")
+		(let* ((json-object-type 'alist)
+			   (data (json-read)))
+		  (funcall continue site-id (alist-get 'departures data)))
+		(kill-buffer (current-buffer)))))
 
 (defun sl/format-departures (raw-departures)
   "Filter and format RAW-DEPARTURES and return a nicely formatted string."
@@ -150,30 +154,27 @@ Reverse the list so that we see the earliest departures first."
 (defun sl/select-and-show ()
   "Select a site and show departures."
   (interactive)
-  (let ((site-id (sl/locations)))
-	(sl/show-departures
-	 site-id
-	 (sl/format-departures
-	  (sl/get-departures site-id)))))
+  (sl/get-locations (lambda ()
+					  (let ((site-id (show-completions-menu sl/locations-cache)))
+						(sl/get-departures site-id #'sl/show-and-format)))))
 
 (defun sl/show-selected ()
   "Show departures from a preconfigured list of stations."
   (interactive)
   (let ((station (completing-read "Pick a station: " (mapcar #'car sl/my-stations))))
 	(let ((site-id (alist-get station sl/my-stations nil nil 'string=)))
-	  (sl/show-departures
-	   site-id
-	   (sl/format-departures
-		(sl/get-departures site-id))))))
+	  (sl/get-departures site-id #'sl/show-and-format))))
 
 (defun sl/refresh-selected ()
   "Refresh from SITE-ID and show new departures."
   (interactive)
-  (sl/show-departures
-   sl/local-site-id
-   (sl/format-departures
-	(sl/get-departures sl/local-site-id))))
+  (sl/get-departures sl/local-site-id #'sl/show-and-format))
 
+(defun sl/show-and-format (site-id departures)
+  "Handle SITE-ID and DEPARTURES."
+  (sl/show-departures
+   site-id
+   (sl/format-departures departures)))
 
 (defun sl/clear-cache ()
   "Clears the cache, used for development mainly."
@@ -181,16 +182,11 @@ Reverse the list so that we see the earliest departures first."
   (setq sl/locations-cache nil))
 
 (defun sl/show-local-site-id ()
-  "Show the local site id."
+  "Show the local site id.  Used primarily for testing."
   (interactive)
   (message (format "Site ID: %s" sl/local-site-id)))
 
 (provide 'sl)
 ;;; sl.el ends here.
-
-
-
-
-
 
 
