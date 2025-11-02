@@ -129,17 +129,19 @@
 	(let ((line-sorted-departures
 		   (seq-sort (lambda (a b)
 					   (< (car a) (car b)))
-					 (seq-group-by (lambda (departure)
-									 (alist-get 'id (alist-get 'line departure))) raw-departures))))
+					 (seq-group-by
+					  (lambda (departure)
+						(alist-get 'id (alist-get 'line departure))) raw-departures))))
 	  (seq-do (lambda (line)
 				(insert (format "\n\nLinje: %s" (car line)))
-				(let ((directions (seq-sort (lambda (a b) (> (car a) (car b))) (seq-group-by
-																				(lambda (x) (alist-get 'direction_code x)) (cdr line)))))
-
+				(let ((directions
+					   (seq-sort (lambda (a b)
+								   (> (car a) (car b)))
+								 (seq-group-by
+								  (lambda (x) (alist-get 'direction_code x)) (cdr line)))))
 				  (dolist (departure (-zip-fill '((destination . "") (display . "")) (alist-get 1 directions) (alist-get 2 directions)))
-					(insert (sl/departure-line (car departure) (cdr departure)))
-					)
-				  )) line-sorted-departures))
+					(insert (sl/departure-line (car departure) (cdr departure))))))
+			  line-sorted-departures))
 	(buffer-string)))
 
 ;; NEW FORMAT DEPARTURES END
