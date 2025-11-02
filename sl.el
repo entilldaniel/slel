@@ -48,7 +48,7 @@
   "Get locations to select and pass CONTINUE to callback."
   (if sl/locations-cache
 	  (funcall continue)
-	(url-retrieve "https://transport.integration.sl.se/v1/sites" #'get-locations-callback `(,continue))))
+	(url-retrieve "https://transport.integration.sl.se/v1/sites" #'sl/get-locations-callback `(,continue))))
 
 (defun sl/get-locations-callback (status continue)
   "Callback for get-locations-new that handles STATUS and will call CONTINUE."
@@ -72,7 +72,7 @@
 (defun sl/get-departures (site-id continue)
   "Get departures from SITE-ID and pass CONTINUE through to callback."
   (url-retrieve (format "https://transport.integration.sl.se/v1/sites/%s/departures?transport=METRO" site-id)
-				#'departures-callback `(,site-id ,continue)))
+				#'sl/departures-callback `(,site-id ,continue)))
 
 (defun sl/departures-callback (status site-id continue)
   "Callback that handles STATUS, SITE-ID and CONTINUE."
@@ -80,8 +80,7 @@
 	  (progn
 		(set-buffer-multibyte t)
 		(prefer-coding-system 'utf-8)
-		(goto-char (point-min))
-		(search-forward "\n\n")
+		(goto-char url-http-end-of-headers)
 		(let* ((json-object-type 'alist)
 			   (data (json-read)))
 		  (funcall continue site-id (alist-get 'departures data)))
@@ -155,7 +154,7 @@ Reverse the list so that we see the earliest departures first."
   "Select a site and show departures."
   (interactive)
   (sl/get-locations (lambda ()
-					  (let ((site-id (show-completions-menu sl/locations-cache)))
+					  (let ((site-id (sl/show-completions-menu sl/locations-cache)))
 						(sl/get-departures site-id #'sl/show-and-format)))))
 
 (defun sl/show-selected ()
