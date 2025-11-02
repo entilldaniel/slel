@@ -86,7 +86,7 @@
 		  (funcall continue site-id (alist-get 'departures data)))
 		(kill-buffer (current-buffer)))))
 
-(defun sl/format-departures (raw-departures)
+(defun sl/format-departures-old (raw-departures)
   "Filter and format RAW-DEPARTURES and return a nicely formatted string."
   (with-temp-buffer
 	(insert (format "Called at: %s\n" (propertize (format-time-string "%H:%M") 'face 'bold)))
@@ -119,6 +119,31 @@
 				(insert (sl/departure-line left right)))))
 		  (insert "\n\n")))
 	  (buffer-string))))
+
+;; NEW FORMAT DEPARTURES
+
+(defun sl/format-departures (raw-departures)
+  "Filter and format RAW-DEPARTURES and return a nicely formatted string."
+  (with-temp-buffer
+	(insert (format "\nCalled at: %s" (propertize (format-time-string "%H:%M") 'face 'bold)))
+	(let ((line-sorted-departures
+		   (seq-sort (lambda (a b)
+					   (< (car a) (car b)))
+					 (seq-group-by (lambda (departure)
+									 (alist-get 'id (alist-get 'line departure))) raw-departures))))
+	  (seq-do (lambda (line)
+				(insert (format "\n\nLinje: %s" (car line)))
+				(let ((directions (seq-sort (lambda (a b) (> (car a) (car b))) (seq-group-by
+																				(lambda (x) (alist-get 'direction_code x)) (cdr line)))))
+
+				  (dolist (departure (-zip-fill '((destination . "") (display . "")) (alist-get 1 directions) (alist-get 2 directions)))
+					(insert (sl/departure-line (car departure) (cdr departure)))
+					)
+				  )) line-sorted-departures))
+	(buffer-string)))
+
+;; NEW FORMAT DEPARTURES END
+
 
 (defun sl/filter-side (line direction)
   "Filter out which side for printing we want from LINE and DIRECTION.
